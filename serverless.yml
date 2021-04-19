@@ -1,0 +1,66 @@
+service: product-stock-scraper
+
+frameworkVersion: '2'
+
+plugins:
+    - serverless-plugin-typescript
+
+package:
+    exclude:
+        - chrome-aws-lambda/**
+        - node_modules/chrome-aws-lambda/**
+        - node_modules/puppeteer/**
+
+provider:
+    name: aws
+    region: us-east-1
+    runtime: nodejs12.x
+    lambdaHashingVersion: 20201221
+    iamRoleStatements:
+        - Effect: Allow
+          Action:
+              - sqs:SendMessage
+          Resource:
+              - Fn::GetAtt: [ProductStockScraperQueue, Arn]
+        - Effect: Allow
+          Action:
+              - sns:Publish
+          Resource: !Ref ProductStockScraperNotifyTopic
+    environment:
+        SQS_QUEUE_URL: { Ref: ProductStockScraperQueue }
+        SNS_TOPIC_ARN: !Ref ProductStockScraperNotifyTopic
+
+functions:
+    processor:
+        handler: src/handler/processor.process
+         events:
+           - schedule: cron(*/120 * * * *)
+         memorySize: 1536
+        timeout: 30
+        layers:
+            - arn:aws:lambda:us-east-1:764866452798:layer:chrome-aws-lambda:22
+    notifier:
+        handler: src/handler/notifier.notify
+        events:
+            - sqs:
+                  arn:
+                      Fn::GetAtt:
+                          - ProductStockScraperQueue
+                          - Arn
+
+resources:
+    Resources:
+        ProductStockScraperQueue:
+            Type: AWS::SQS::Queue
+            Properties:
+                QueueName: ProductStockScraperQueue
+        ProductStockScraperNotifyTopic:
+            Type: AWS::SNS::Topic
+            Properties:
+                TopicName: ProductStockScraperNotifyTopic
+        NotifyTopicEmailSubscription:
+            Type: AWS::SNS::Subscription
+            Properties:
+                Endpoint:
+                Protocol: email
+                TopicArn: !Ref ProductStockScraperNotifyTopic
